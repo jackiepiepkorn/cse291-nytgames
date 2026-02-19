@@ -92,7 +92,10 @@ class LLMHandler:
                 f"No points earned."
             )
 
-        guessed = ", ".join(obs["words_guessed"]) if obs["words_guessed"] else "none"
+        if obs["words_guessed"]:
+            guessed = ", ".join(obs["words_guessed"])
+        else:
+            guessed = "none"
         msg += (
             f"\nGuesses used: {obs['num_guesses']}. "
             f"Words guessed so far: {guessed}.\n"
