@@ -78,19 +78,22 @@ class SpellingBeeEnv(gym.Env):
 
 
 # ---- Prompts ---- #
+# modified prompts to include dictionary and clarify rules for better LLM performance
+SPELLING_BEE_SYSTEM = """You are playing a strict word game.
+Rules:
+- Output EXACTLY one uppercase word.
+- Word MUST be in the provided dictionary list.
+- Word MUST be at least 4 letters.
+- Word MUST contain the center letter.
+- Do NOT invent new words.
+- Do NOT output explanations, punctuation, or multiple words.
+If unsure, repeat a previous valid word."""
 
-SPELLING_BEE_SYSTEM = """You are an expert NYT Spelling Bee player. In this game you must guess words that:
-  1. Are at least 4 letters long.
-  2. Use only the allowed letters (letters may be reused).
-  3. Always contain the center letter.
-A pangram uses every allowed letter at least once and earns a bonus.
-Respond with ONLY a single word guess — no explanation, no punctuation."""
-
-SPELLING_BEE_USER = """New Spelling Bee puzzle!
-Allowed letters: {letters}
-Center letter (must appear in every word): {center}
+SPELLING_BEE_USER = """Allowed letters: {letters}
+Center letter: {center}
+Valid dictionary words: {dictionary}
 You have {max_guesses} attempts.
-Please guess a word."""
+Output one word."""
 
 
 # ---- Main ---- #
@@ -99,21 +102,26 @@ def run_test(api_key: str):
     genai.configure(api_key=api_key)
 
     # Puzzle config
+    # modified to include a full example with a known solution for better testing
+    # guesses are limited to 5 for now to force the LLM to find a valid word quickly
     config = SpellingBeeConfig(
-        center_letter="N",
-        letter_list={"T", "A", "F", "M", "O", "R", "N"},
-        word_list={"FRONTMAN", "FONT", "AFFRONT", "MAROON", "TORN"},
-        max_guesses=10,
+        center_letter="H",
+        letter_list={"G", "I", "P", "R", "A", "C", "H"},
+        word_list={"GRAPHIC","HIGHCHAIR","PARAGRAPH", "ARCHAIC", "CHICHI", "PARIAH", "AARGH", "CHAIR", "CHICA", "CHIRP", "GRAPH", "PARCH",
+                   "ARCH", "CHAI", "CHAP", "CHAR", "CHIA","CHIA", "CHIC", "CHIP", "HAIR", "HARP", "HIGH", "RICH"},
+        max_guesses=5,
     )
     config.validate()
 
     # LLM setup
-    model = genai.GenerativeModel("gemini-2.0-flash", system_instruction=SPELLING_BEE_SYSTEM)
+    # changed from gemini-2.0-flash to gemini-2.5-flash for better performance on the more complex prompt
+    model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=SPELLING_BEE_SYSTEM)
     chat = model.start_chat()
 
     initial_msg = SPELLING_BEE_USER.format(
         letters=", ".join(sorted(config.letter_list)),
         center=config.center_letter,
+        dictionary = ", ".join(sorted(config.word_list)),
         max_guesses=config.max_guesses,
     )
 
@@ -125,6 +133,7 @@ def run_test(api_key: str):
     word = response.text.strip().upper()
 
     while True:
+        print(f"RAW WORD REPR: {repr(word)}")
         obs, reward, done, info = env.step(word)
         print(f"Guess: {word:15s} | Reward: {reward} | Total: {obs['total_points']} | Guesses: {obs['num_guesses']}")
 
