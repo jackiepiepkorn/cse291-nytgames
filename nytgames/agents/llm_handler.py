@@ -1,7 +1,7 @@
 from pathlib import Path
 from huggingface_hub import InferenceClient
 
-PROMPTS_DIR = Path(__file__).parent / "prompts"
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 SUPPORTED_GAMES = {"wordle", "spelling_bee"}
 
 def _load_prompt(filename):

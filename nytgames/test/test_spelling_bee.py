@@ -1,80 +1,7 @@
 import google.generativeai as genai
 import gymnasium as gym
 from dataclasses import dataclass
-
-# ---- Config & Env (imported inline to keep tester self-contained) ---- #
-
-@dataclass
-class SpellingBeeConfig:
-    center_letter: str
-    letter_list: set[str]
-    word_list: set[str]
-    max_guesses: int = 10
-
-    def validate(self):
-        assert self.center_letter in self.letter_list, "Center letter must be in the letter list"
-        assert all(letter in self.letter_list for word in self.word_list for letter in word), "All words must be formed from the letter list"
-        for word in self.word_list:
-            assert any(letter == self.center_letter for letter in word), "All words must contain the center letter"
-        assert self.max_guesses > 0, "Max guesses must be a positive integer"
-
-
-class SpellingBeeEnv(gym.Env):
-
-    def __init__(self, config: SpellingBeeConfig):
-        super().__init__()
-        self.config = config
-        self.num_guesses = 0
-        self.total_points = 0
-        self.words_guessed = set()
-        self.info = {'history': []}
-
-    def reset(self):
-        self.num_guesses = 0
-        self.total_points = 0
-        self.words_guessed = set()
-        self.info = {'history': []}
-        return self._get_obs(), self.info
-
-    def _get_obs(self):
-        return {
-            'num_guesses': self.num_guesses,
-            'total_points': self.total_points,
-            'words_guessed': list(self.words_guessed)
-        }
-
-    def step(self, action):
-        self.num_guesses += 1
-        self.words_guessed.add(action)
-        if not self._word_is_valid(action):
-            self.info['history'].append((action, 0))
-            return self._get_obs(), 0, self._is_done(), self.info
-        reward = self._get_reward(action)
-        self.total_points += reward
-        self.info['history'].append((action, reward))
-        return self._get_obs(), reward, self._is_done(), self.info
-
-    def _get_reward(self, word):
-        if len(word) < 4:
-            return 0
-        elif len(word) == 4:
-            return 1
-        else:
-            reward = len(word)
-            if self._is_pangram(word):
-                reward += 7
-            return reward
-
-    def _is_pangram(self, word):
-        return set(word) >= set(self.config.letter_list)
-
-    def _word_is_valid(self, word):
-        return (word in self.config.word_list and
-                set(word) <= set(self.config.letter_list) and
-                self.config.center_letter in word)
-
-    def _is_done(self):
-        return self.num_guesses >= self.config.max_guesses
+from nytgames import SpellingBeeConfig, SpellingBeeEnv
 
 
 # ---- Prompts ---- #
@@ -134,10 +61,10 @@ def run_test(api_key: str):
 
     while True:
         print(f"RAW WORD REPR: {repr(word)}")
-        obs, reward, done, info = env.step(word)
+        obs, reward, terminated, truncated, info = env.step(word)
         print(f"Guess: {word:15s} | Reward: {reward} | Total: {obs['total_points']} | Guesses: {obs['num_guesses']}")
 
-        if done:
+        if terminated or truncated:
             break
 
         # Build feedback
