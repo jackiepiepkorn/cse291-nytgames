@@ -1,0 +1,9 @@
+gymnasium
+huggingface_hub
+google-generativeai
+openai
+numpy
+pandas
+matplotlib
+torch
+stable-baselines3
