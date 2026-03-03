@@ -1,6 +1,6 @@
 from .base import NYTGameEnv
 from .spellingbee import SpellingBeeConfig, SpellingBeeEnv
-from .Strands import StrandsConfig, StrandsEnv
+from .strands import StrandsConfig, StrandsEnv
 
 __all__ = [
     "NYTGameEnv",
@@ -8,4 +8,6 @@ __all__ = [
     "SpellingBeeEnv",
     "StrandsConfig",
     "StrandsEnv",
+    "ConnectionsConfig",
+    "ConnectionsEnv"
 ]
