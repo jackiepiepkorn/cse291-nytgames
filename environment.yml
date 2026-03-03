@@ -16,3 +16,8 @@ dependencies:
     - google-generativeai
     - openai
     - stable-baselines3
+    - datasets
+    - transformers
+    - accelerate
+    - peft
+    - trl

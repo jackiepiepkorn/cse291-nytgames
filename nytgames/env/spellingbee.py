@@ -50,8 +50,9 @@ class SpellingBeeEnv(NYTGameEnv):
     def step(self, action):
         # TODO: add feedback in message (e.g. too short, missing center letter, etc.)
         self.num_guesses += 1
+        was_guessed = action in self.words_guessed
         self.words_guessed.add(action)
-        if not self._word_is_valid(action):
+        if was_guessed or not self._word_is_valid(action):
             self.info['history'].append((action, 0))
             return self._get_obs(), 0, self._is_terminated(), self._is_truncated(), self.info
         else:
@@ -90,6 +91,10 @@ class SpellingBeeEnv(NYTGameEnv):
                 set(word) <= set(self.config.letter_list) and
                 self.config.center_letter in word)
 
+    def legal_words(self) -> set[str]:
+        """Returns valid puzzle words that have not been guessed yet."""
+        return set(self.config.word_list) - set(self.valid_words_guessed)
+
     def _is_terminated(self) -> bool:
         """
         _is_terminated returns True if all valid words have been guessed,
@@ -125,4 +130,3 @@ if __name__ == "__main__":
         if truncated or terminated:
             print("Game Over!")
             break
-

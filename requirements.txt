@@ -7,3 +7,8 @@ pandas
 matplotlib
 torch
 stable-baselines3
+datasets
+transformers
+accelerate
+peft
+trl
