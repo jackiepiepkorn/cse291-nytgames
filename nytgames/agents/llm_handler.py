@@ -2,7 +2,7 @@ from pathlib import Path
 from huggingface_hub import InferenceClient
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-SUPPORTED_GAMES = {"wordle", "spelling_bee"}
+SUPPORTED_GAMES = {"wordle", "spelling_bee", "strands"}
 
 def _load_prompt(filename):
     return (PROMPTS_DIR / filename).read_text(encoding="utf-8").strip()
@@ -15,7 +15,7 @@ class LLMHandler:
         self.temperature = temperature
         self.messages = []
 
-    def reset(self, config):
+    def reset(self, config, **kwargs):
         system_prompt = _load_prompt(f"{self.game}_system.md")
         if self.game == "wordle":
             user_prompt = _load_prompt(f"{self.game}_user.md").format(
@@ -26,6 +26,13 @@ class LLMHandler:
                 letters=", ".join(sorted(config.letter_set)),
                 center=config.center_letter,
                 max_guesses=config.max_guesses
+            )
+        elif self.game == "strands":
+            user_prompt = _load_prompt(f"{self.game}_user.md").format(
+                theme=config.theme,
+                num_theme_words=len(config.theme_words),
+                max_guesses=config.max_guesses,
+                board_str=kwargs.get("board_str", ""),
             )
         self.messages = [{"role": "system", "content": system_prompt},
                          {"role": "user", "content": user_prompt}]
@@ -45,6 +52,8 @@ class LLMHandler:
             self._wordle_feedback(word, reward, obs, **kwargs)
         elif self.game == "spelling_bee":
             self._spelling_bee_feedback(word, reward, obs)
+        elif self.game == "strands":
+            self._strands_feedback(word, reward, obs)
 
     def _wordle_feedback(self, word, reward, obs, feedback_list=None, guess_num=0, max_guesses=6):
         parts = []
@@ -95,5 +104,21 @@ class LLMHandler:
             f"\nGuesses used: {obs['num_guesses']}. "
             f"Words found so far: {found}.\n"
             f"Please guess another word."
+        )
+        self.messages.append({"role": "user", "content": msg})
+
+    def _strands_feedback(self, word, reward, obs):
+        feedback = obs.get("feedback", "")
+        if reward == 5:
+            msg = f"'{word}': {feedback} Spanagram! +5 points."
+        elif reward == 1:
+            msg = f"'{word}': {feedback} +1 point."
+        else:
+            msg = f"'{word}': {feedback}"
+        msg += (
+            f"\n{obs['progress']}"
+            f"\nGuesses used: {obs['num_guesses']}."
+            f"\n\nUpdated board:\n{obs['board_str']}"
+            f"\nPlease guess another word."
         )
         self.messages.append({"role": "user", "content": msg})

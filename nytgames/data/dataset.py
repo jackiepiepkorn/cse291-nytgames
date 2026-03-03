@@ -9,8 +9,12 @@ _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 _SYSTEM_PROMPT = (_PROMPTS_DIR / "spelling_bee_system.md").read_text().strip()
 _USER_PROMPT_TEMPLATE = (_PROMPTS_DIR / "spelling_bee_user.md").read_text().strip()
 
-_CSV_PATH = Path(__file__).parent / "spelling_bee.csv"
+_SPELLING_BEE_CSV_PATH = Path(__file__).parent / "spelling_bee.csv"
+_DICTIONARY_TXT_PATH = Path(__file__).parent / "dictionary.txt"
 
+def load_dictionary(txt_path: Path = _DICTIONARY_TXT_PATH) -> set[str]:
+    dictionary = [word.strip().upper() for word in open(txt_path).read().split()]
+    return set(dictionary)
 
 class SpellingBeeDataset(Dataset):
     """
@@ -22,7 +26,7 @@ class SpellingBeeDataset(Dataset):
         "puzzle_id" - int puzzle identifier (useful for seeding the env in reward fn)
     """
 
-    def __init__(self, max_guesses: int = 10, csv_path: Path = _CSV_PATH):
+    def __init__(self, max_guesses: int = 10, csv_path: Path = _SPELLING_BEE_CSV_PATH):
         df = pd.read_csv(csv_path)
         df["letters"] = df["letters"].apply(lambda s: set(str(s).upper()))
         df["center"] = df["center"].str.upper()
