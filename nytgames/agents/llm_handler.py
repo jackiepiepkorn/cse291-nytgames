@@ -23,7 +23,7 @@ class LLMHandler:
             )
         elif self.game == "spelling_bee":
             user_prompt = _load_prompt(f"{self.game}_user.md").format(
-                letters=", ".join(sorted(config.letter_list)),
+                letters=", ".join(sorted(config.letter_set)),
                 center=config.center_letter,
                 max_guesses=config.max_guesses
             )
@@ -81,24 +81,19 @@ class LLMHandler:
         self.messages.append({"role": "user", "content": msg})
 
     def _spelling_bee_feedback(self, word, reward, obs):
+        feedback = obs.get("feedback", "")
         if reward > 0:
             msg = (
-                f"'{word}' was correct! You earned {reward} point(s). "
+                f"'{word}': {feedback} You earned {reward} point(s). "
                 f"Running total: {obs['total_points']}."
             )
         else:
-            msg = (
-                f"'{word}' was not accepted (invalid or already guessed). "
-                f"No points earned."
-            )
+            msg = f"'{word}': {feedback} No points earned."
 
-        if obs["words_guessed"]:
-            guessed = ", ".join(obs["words_guessed"])
-        else:
-            guessed = "none"
+        found = ", ".join(obs["valid_words_guessed"]) if obs["valid_words_guessed"] else "none"
         msg += (
             f"\nGuesses used: {obs['num_guesses']}. "
-            f"Words guessed so far: {guessed}.\n"
+            f"Words found so far: {found}.\n"
             f"Please guess another word."
         )
         self.messages.append({"role": "user", "content": msg})

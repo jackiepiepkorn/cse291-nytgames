@@ -33,8 +33,8 @@ def run_test(api_key: str):
     # guesses are limited to 5 for now to force the LLM to find a valid word quickly
     config = SpellingBeeConfig(
         center_letter="H",
-        letter_list={"G", "I", "P", "R", "A", "C", "H"},
-        word_list={"GRAPHIC","HIGHCHAIR","PARAGRAPH", "ARCHAIC", "CHICHI", "PARIAH", "AARGH", "CHAIR", "CHICA", "CHIRP", "GRAPH", "PARCH",
+        letter_set={"G", "I", "P", "R", "A", "C", "H"},
+        word_set={"GRAPHIC","HIGHCHAIR","PARAGRAPH", "ARCHAIC", "CHICHI", "PARIAH", "AARGH", "CHAIR", "CHICA", "CHIRP", "GRAPH", "PARCH",
                    "ARCH", "CHAI", "CHAP", "CHAR", "CHIA","CHIA", "CHIC", "CHIP", "HAIR", "HARP", "HIGH", "RICH"},
         max_guesses=5,
     )
@@ -46,9 +46,9 @@ def run_test(api_key: str):
     chat = model.start_chat()
 
     initial_msg = SPELLING_BEE_USER.format(
-        letters=", ".join(sorted(config.letter_list)),
+        letters=", ".join(sorted(config.letter_set)),
         center=config.center_letter,
-        dictionary = ", ".join(sorted(config.word_list)),
+        dictionary = ", ".join(sorted(config.word_set)),
         max_guesses=config.max_guesses,
     )
 
