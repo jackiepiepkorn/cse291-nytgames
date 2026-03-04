@@ -12,9 +12,15 @@ _USER_PROMPT_TEMPLATE = (_PROMPTS_DIR / "spelling_bee_user.md").read_text().stri
 _SPELLING_BEE_CSV_PATH = Path(__file__).parent / "spelling_bee.csv"
 _DICTIONARY_TXT_PATH = Path(__file__).parent / "dictionary.txt"
 
-def load_dictionary(txt_path: Path = _DICTIONARY_TXT_PATH) -> set[str]:
+def load_dictionary(txt_path: Path = _DICTIONARY_TXT_PATH, length: int = None) -> set[str]:
+    if length is not None and length <= 0:
+        raise ValueError(f"Length {length} must be > 0 or None for all words.")
+
     dictionary = [word.strip().upper() for word in open(txt_path).read().split()]
-    return set(dictionary)
+    if length is None:
+        return set(dictionary)
+    else:
+        return set([word for word in dictionary if len(word) == length])
 
 class SpellingBeeDataset(Dataset):
     """

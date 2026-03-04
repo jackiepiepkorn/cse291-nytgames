@@ -29,7 +29,7 @@ class WordleConfig:
         assert all(len(word) == WORDLE_WORD_LENGTH for word in self.word_set), f"All words in the word set must be {WORDLE_WORD_LENGTH} letters long"
         assert self.max_guesses > 0, "Max guesses must be a positive integer"
 
-#Tile states 
+#Tile states
 CORRECT = "correct"  # green color, right color and right position
 PRESENT = "present"  # yellow color, right color but wrong position
 ABSENT = "absent"    # gray color, letter not in word at all
@@ -37,7 +37,7 @@ ABSENT = "absent"    # gray color, letter not in word at all
 def _score_guess(guess: str, target: str) -> list[str]:
     """
     Return a per letter result list for a single guess against target
-    i.e. list of CORRECT / PRESENT / ABSENT, one entry per letter 
+    i.e. list of CORRECT / PRESENT / ABSENT, one entry per letter
     """
     result = [ABSENT] * WORDLE_WORD_LENGTH
     target_remaining = list(target)  # to keep track of which letters in target have been matched
@@ -46,14 +46,14 @@ def _score_guess(guess: str, target: str) -> list[str]:
         if g == t:
             result[i] = CORRECT
             target_remaining[i] = None  # mark this letter as matched
-    
+
     for i, g in enumerate(guess):
         if result[i] == CORRECT:
             continue  # already scored as correct
         if g in target_remaining:
             result[i] = PRESENT
             target_remaining[target_remaining.index(g)] = None  # mark this letter as matched
-    
+
     return result
 
 def _format_feedback(guess: str, tile_results: list[str]) -> str:
@@ -75,19 +75,19 @@ class WordleEnv(NYTGameEnv):
 
     Observation (dict):
         num_guesses:    number of guesses made so far
-        guesses:        list of all guesses made so far (only valid format ones) 
+        guesses:        list of all guesses made so far (only valid format ones)
         feedback:       human-readable result of the last guess, or None on reset
-        keyboard:       dict mapping letters to their current known status (CORRECT, PRESENT, ABSENT, or None if not guessed yet)  
+        keyboard:       dict mapping letters to their current known status (CORRECT, PRESENT, ABSENT, or None if not guessed yet)
         solved:         boolean indicating if the puzzle has been solved
-    
+
     Action:
         A string representing a 5-letter guess (case-insensitive).
 
     Reward:
         0: invalid guess (wrong length, not in word list)
-        1: valid guess, not the answer 
-        10: correct answer on any attempt 
-        Bonus for guessing early: +2 per remaining guess after the winning one 
+        1: valid guess, not the answer
+        10: correct answer on any attempt
+        Bonus for guessing early: +2 per remaining guess after the winning one
 
     Termination: target word guessed correctly
     Truncation: max_guesses reached without guessing target word
@@ -102,7 +102,7 @@ class WordleEnv(NYTGameEnv):
     def reset(self) -> tuple[dict, dict]:
         self._reset_state()
         return self._get_obs(), self.info  # Return initial observation and info
-    
+
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         action = action.strip().upper()
 
@@ -117,12 +117,12 @@ class WordleEnv(NYTGameEnv):
             reward = self._get_reward(action)
         else:
             reward = 0
-        
+
         self.total_points += reward
         self.info['history'].append((action, reward, feedback))
 
         return self._get_obs(), reward, self._is_terminated(), self._is_truncated(), self.info
-    
+
     def render(self):
         if self.render_mode != "human":
             return
@@ -135,9 +135,9 @@ class WordleEnv(NYTGameEnv):
             print("⬜⬜⬜⬜⬜")
         print(f"\nTotal points: {self.total_points} ")
         print(f"Keyboard: {self._keyboard_display()}")
-    
+
     def close(self):
-        pass 
+        pass
 
     def _get_obs(self) -> dict:
         obs = {
@@ -148,7 +148,7 @@ class WordleEnv(NYTGameEnv):
             'solved': self.solved
         }
         return obs
-    
+
     def _get_reward(self, action: str) -> float:
         if action == self.config.target_word:
             # Base reward for solving the puzzle
@@ -158,13 +158,13 @@ class WordleEnv(NYTGameEnv):
             return reward
         else:
             return 1  # valid guess but not correct answer
-        
+
     def _is_terminated(self) -> bool:
         return self.solved
-    
+
     def _is_truncated(self) -> bool:
         return self.num_guesses >= self.config.max_guesses and not self.solved
-    
+
     # INTERNAL HELPER METHODS
     def _reset_state(self):
         self.num_guesses = 0
@@ -179,30 +179,34 @@ class WordleEnv(NYTGameEnv):
             return False, f"Invalid guess: '{guess}' is not {WORDLE_WORD_LENGTH} letters long.", None
         if guess not in self.config.word_set:
             return False, f"Invalid guess: '{guess}' is not in the word list.", None
-        
+
         tile_results = _score_guess(guess, self.config.target_word)
         feedback = _format_feedback(guess, tile_results)
         if guess == self.config.target_word:
             feedback += " - Correct!"
-        
+
         return True, feedback, tile_results
-    
+
     def _update_keyboard(self, guess: str, tile_results: list[str]):
         priority = {None: 0, ABSENT: 1, PRESENT: 2, CORRECT: 3}
         for letter, result in zip(guess, tile_results):
             current = self.keyboard[letter]
             if priority[result] > priority[current]:
                 self.keyboard[letter] = result
-    
+
     def _keyboard_display(self) -> str:
         symbols = {CORRECT: "🟩", PRESENT: "🟨", ABSENT: "⬜", None: " "}
         return " ".join(f"{letter}{symbols[status]}"for letter, status in self.keyboard.items())
 
 if __name__ == "__main__":
     # Quick manual test with a tiny word list
+    from nytgames import load_dictionary
+
+    word_set = load_dictionary(length=WORDLE_WORD_LENGTH)
+
     config = WordleConfig(
         target_word="CRANE",
-        word_set={"CRANE", "SLATE", "AUDIO", "AROSE", "STARE", "TRAIN", "PLAIN", "BRAIN"},
+        word_set=word_set, #{"CRANE", "SLATE", "AUDIO", "AROSE", "STARE", "TRAIN", "PLAIN", "BRAIN"},
         max_guesses=6,
     )
 
