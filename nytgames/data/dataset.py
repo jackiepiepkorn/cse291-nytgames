@@ -134,10 +134,12 @@ class StrandsDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         row = self._rows[idx]
+        num_theme = int(row["num_theme_words"])
         user_msg = self._USER_PROMPT_TEMPLATE.format(
-            clue=row["clue"],
-            board=_format_strands_board(row["board"]),
-            num_theme_words=int(row["num_theme_words"]),
+            theme=row["clue"],
+            board_str=_format_strands_board(row["board"]),
+            num_theme_words=num_theme,
+            max_guesses=3 * num_theme,
         )
         return {
             "prompt": [
