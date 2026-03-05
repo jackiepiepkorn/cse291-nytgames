@@ -142,6 +142,7 @@ class WordleEnv(NYTGameEnv):
     def _get_obs(self) -> dict:
         obs = {
             'num_guesses': self.num_guesses,
+            'total_points': self.total_points,
             'guesses': list(self.guesses),  # list of (guess, tile_results)
             'feedback': self.info['history'][-1][2] if self.info['history'] else None,  # feedback from last guess
             'keyboard': dict(self.keyboard),
