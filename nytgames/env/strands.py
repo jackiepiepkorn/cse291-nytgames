@@ -100,7 +100,7 @@ class StrandsConfig:
     def __post_init__(self):
         # Normalize to uppercase
         self.board = [[c.upper() for c in row] for row in self.board]
-        self.theme_words = frozenset(w.upper() for w in self.theme_words)
+        self.theme_words = frozenset(w.upper() for w in (*self.theme_words, self.spanagram.upper()))
         self.spanagram = self.spanagram.upper()
 
         # Derive dimensions
@@ -339,32 +339,43 @@ class StrandsEnv(NYTGameEnv):
 if __name__ == "__main__":
     # Run with python -m nytgames.env.strands
     from nytgames import load_dictionary
+    from nytgames.data import StrandsDataset
 
-    board = [
-        list("COWESS"),
-        list("HSODKI"),
-        list("TBRPRN"),
-        list("OOKLTE"),
-        list("ANIOUR"),
-        list("PTNEGN"),
-        list("YRGSPA"),
-        list("IFIWEC"),
-    ]
+    # Option A: using the strands dataset randomly choose one of the puzzles
+    dataset = StrandsDataset()
+    puzzle_id = random.randint(1,731)
+    config = dataset.get_config(puzzle_id)
+
     dictionary = load_dictionary()
-    print("dict length:", len(dictionary))
-
-    config = StrandsConfig(
-        board=board,
-        theme_words=frozenset({"WIFI", "DESKS", "PRINTER", "LOUNGE", "PANTRY", "BOOTHS", "COWORKINGSPACE"}),
-        spanagram="COWORKINGSPACE",
-        theme="Home office alternative",
-        dictionary=dictionary
-    )
+    config.dictionary = dictionary
     print(f"Theme: {config.theme}")
-    print(f"Words ({len(config.word_lookup)}): {sorted(config.word_lookup.keys())}")
-    print(f"Spanagram: {config.spanagram}")
-    print(f"Max guesses: {config.max_guesses}")
-    print()
+
+    # Option B: have a fixed puzzle board
+    # board = [
+    #     list("COWESS"),
+    #     list("HSODKI"),
+    #     list("TBRPRN"),
+    #     list("OOKLTE"),
+    #     list("ANIOUR"),
+    #     list("PTNEGN"),
+    #     list("YRGSPA"),
+    #     list("IFIWEC"),
+    # ]
+    # dictionary = load_dictionary()
+    # print("dict length:", len(dictionary))
+
+    # config = StrandsConfig(
+    #     board=board,
+    #     theme_words=frozenset({"WIFI", "DESKS", "PRINTER", "LOUNGE", "PANTRY", "BOOTHS", "COWORKINGSPACE"}),
+    #     spanagram="COWORKINGSPACE",
+    #     theme="Home office alternative",
+    #     dictionary=dictionary
+    # )
+    # print(f"Theme: {config.theme}")
+    # print(f"Words ({len(config.word_lookup)}): {sorted(config.word_lookup.keys())}")
+    # print(f"Spanagram: {config.spanagram}")
+    # print(f"Max guesses: {config.max_guesses}")
+    # print()
 
     # Init variables to track game status
     truncated = False   # True if max guesses are used

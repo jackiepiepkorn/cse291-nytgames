@@ -205,14 +205,22 @@ class ConnectionsEnv(NYTGameEnv):
 
 if __name__ == "__main__":
     # Quick manual test
-    config = ConnectionsConfig(
-        categories={
-            "WEB BROWSERS": ["EDGE", "CHROME", "OPERA", "SAFARI"],
-            "SYNONYMS FOR 'FAST'": ["QUICK", "RAPID", "SWIFT", "BRISK"],
-            "TYPES OF PASTA": ["PENNE", "ZITI", "RIGATONI", "FARFALLE"],
-            "COMPANIES WITH AN 'X'": ["XEROX", "EXXON", "ROLEX", "CLOROX"]
-        }
-    )
+    from nytgames.data import ConnectionsDataset
+
+    # Option A: using the connections dataset randomly choose one of the puzzles
+    dataset = ConnectionsDataset()
+    puzzle_id = random.randint(1,974)
+    config = dataset.get_config(puzzle_id)
+
+    # Option B: manually give a config
+    # config = ConnectionsConfig(
+    #     categories={
+    #         "WEB BROWSERS": ["EDGE", "CHROME", "OPERA", "SAFARI"],
+    #         "SYNONYMS FOR 'FAST'": ["QUICK", "RAPID", "SWIFT", "BRISK"],
+    #         "TYPES OF PASTA": ["PENNE", "ZITI", "RIGATONI", "FARFALLE"],
+    #         "COMPANIES WITH AN 'X'": ["XEROX", "EXXON", "ROLEX", "CLOROX"]
+    #     }
+    # )
 
     truncated = False
     terminated = False
