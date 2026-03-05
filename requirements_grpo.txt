@@ -1,0 +1,22 @@
+# Core
+torch>=2.1
+transformers>=4.46
+datasets>=3.0
+accelerate>=1.0
+
+# TRL with GRPO support
+trl>=0.15
+
+# LoRA / parameter-efficient fine-tuning
+peft>=0.13
+
+# Quantisation (optional, for 4-bit training)
+bitsandbytes>=0.44
+
+# Flash Attention 2 (optional, Linux/CUDA only — speeds up training)
+# flash-attn>=2.5
+
+# Existing dependencies
+huggingface_hub
+gymnasium
+google-generativeai
