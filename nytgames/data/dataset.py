@@ -53,14 +53,14 @@ class SpellingBeeDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         row = self._rows[idx]
-        user_msg = _USER_PROMPT_TEMPLATE.format(
+        user_msg = self._USER_PROMPT_TEMPLATE.format(
             letters=", ".join(sorted(row["letters"])),
             center=row["center"],
             max_guesses=self._max_guesses,
         )
         return {
             "prompt": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": self._SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
             "puzzle_id": int(row["puzzle_id"]),
