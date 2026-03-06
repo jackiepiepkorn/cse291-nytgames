@@ -6,6 +6,7 @@ import pandas as pd
 from ..env.spellingbee import SpellingBeeConfig
 from ..env.strands import StrandsConfig
 from ..env.connections import ConnectionsConfig, CATEGORIES_COUNT, WORDS_PER_CATEGORY
+from ..env.wordle import WordleConfig, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -13,6 +14,8 @@ _SPELLING_BEE_CSV_PATH = Path(__file__).parent / "spelling_bee.csv"
 _DICTIONARY_TXT_PATH = Path(__file__).parent / "dictionary.txt"
 _STRANDS_CSV_PATH = Path(__file__).parent / "strands.csv"
 _CONNECTIONS_CSV_PATH = Path(__file__).parent / "connections.csv"
+_WORDLE_VALID_GUESSES_CSV_PATH = Path(__file__).parent / "wordle_valid_guesses.csv"
+_WORDLE_PAST_SOLUTIONS_TXT_PATH = Path(__file__).parent / "wordle_past_solutions.txt"
 
 def load_dictionary(txt_path: Path = _DICTIONARY_TXT_PATH, length: int = None) -> set[str]:
     if length is not None and length <= 0:
@@ -225,6 +228,71 @@ class ConnectionsDataset(Dataset):
     def sample(self) -> tuple[ConnectionsConfig, int]:
         row = random.choice(self._rows)
         return self.get_config(row["puzzle_id"]), int(row["puzzle_id"])
+
+
+class WordleDataset(Dataset):
+    _SYSTEM_PROMPT = (_PROMPTS_DIR / "wordle_system.md").read_text().strip()
+    _USER_PROMPT_TEMPLATE = (_PROMPTS_DIR / "wordle_user.md").read_text().strip()
+
+    def __init__(
+        self,
+        max_guesses: int = WORDLE_MAX_GUESSES,
+        guesses_csv_path: Path = _WORDLE_VALID_GUESSES_CSV_PATH,
+        solutions_txt_path: Path = _WORDLE_PAST_SOLUTIONS_TXT_PATH,
+    ):
+        guesses_df = pd.read_csv(guesses_csv_path)
+        guess_col = "word" if "word" in guesses_df.columns else guesses_df.columns[0]
+        word_set = {
+            str(word).strip().upper()
+            for word in guesses_df[guess_col].dropna().tolist()
+            if len(str(word).strip()) == WORDLE_WORD_LENGTH
+        }
+
+        solutions = [
+            word.strip().upper()
+            for word in solutions_txt_path.read_text().splitlines()
+            if len(word.strip()) == WORDLE_WORD_LENGTH
+        ]
+        word_set.update(solutions)
+
+        self._word_set = word_set
+        self._rows = [
+            {"puzzle_id": puzzle_id, "target_word": target_word}
+            for puzzle_id, target_word in enumerate(solutions)
+        ]
+        self._max_guesses = max_guesses
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, idx: int) -> dict:
+        row = self._rows[idx]
+        user_msg = self._USER_PROMPT_TEMPLATE.format(max_guesses=self._max_guesses)
+        return {
+            "prompt": [
+                {"role": "system", "content": self._SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "puzzle_id": int(row["puzzle_id"]),
+        }
+
+    def get_config(self, puzzle_id: int, max_guesses: int = None) -> WordleConfig:
+        max_guesses = max_guesses if max_guesses is not None else self._max_guesses
+        try:
+            row = next(r for r in self._rows if r["puzzle_id"] == puzzle_id)
+        except StopIteration:
+            raise ValueError(f"puzzle_id {puzzle_id} not found in WordleDataset")
+        return WordleConfig(
+            target_word=row["target_word"],
+            word_set=self._word_set,
+            max_guesses=max_guesses,
+        )
+
+    def sample(self, max_guesses: int = None) -> tuple[WordleConfig, int]:
+        row = random.choice(self._rows)
+        return self.get_config(row["puzzle_id"], max_guesses=max_guesses), int(
+            row["puzzle_id"]
+        )
 
 # module level helper
 def _format_strands_board(board: list[list[str]]) -> str:
