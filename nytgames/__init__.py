@@ -1,4 +1,4 @@
-from .env import NYTGameEnv, SpellingBeeConfig, SpellingBeeEnv, StrandsConfig, StrandsEnv, WordleConfig, WordleEnv
+from .env import NYTGameEnv, SpellingBeeConfig, SpellingBeeEnv, StrandsConfig, StrandsEnv, WordleConfig, WordleEnv, ConnectionsConfig, ConnectionsEnv
 from .agents import LLMHandler
 from .data import ConnectionsDataset, SpellingBeeDataset, StrandsDataset, WordleDataset, load_dictionary
 
