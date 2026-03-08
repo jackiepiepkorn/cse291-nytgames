@@ -10,6 +10,8 @@ __all__ = [
     "StrandsEnv",
     "WordleConfig",
     "WordleEnv",
+    "ConnectionsConfig"
+    "ConnectionsEnv",
     "LLMHandler",
     "SpellingBeeDataset",
     "StrandsDataset",
