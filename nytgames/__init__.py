@@ -1,6 +1,6 @@
 from .env import NYTGameEnv, SpellingBeeConfig, SpellingBeeEnv, StrandsConfig, StrandsEnv, WordleConfig, WordleEnv
 from .agents import LLMHandler
-from .data import SpellingBeeDataset, load_dictionary
+from .data import ConnectionsDataset, SpellingBeeDataset, StrandsDataset, WordleDataset, load_dictionary
 
 __all__ = [
     "NYTGameEnv",
@@ -12,5 +12,8 @@ __all__ = [
     "WordleEnv",
     "LLMHandler",
     "SpellingBeeDataset",
+    "StrandsDataset",
+    "ConnectionsDataset",
+    "WordleDataset",
     "load_dictionary",
 ]
