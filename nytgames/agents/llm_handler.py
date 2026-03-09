@@ -1,5 +1,6 @@
 from pathlib import Path
 from huggingface_hub import InferenceClient
+from nytgames.env.wordle import _format_feedback
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 SUPPORTED_GAMES = {"wordle", "spelling_bee", "strands", "connections"}
@@ -66,15 +67,13 @@ class LLMHandler:
             self._connections_feedback(word, reward, obs)
 
     def _wordle_feedback(self, word, reward, obs, guess_num=0, max_guesses=6):
-        # map env tile states to display labels
-        label = {"CORRECT": "GREEN", "PRESENT": "YELLOW", "ABSENT": "GRAY"}
-
         guess_tiles = next(
-            (tiles for w, tiles in obs["guesses"] if w == word), []
+            (tiles for w, tiles in obs["guesses"] if w == word), None
         )
-        feedback_str = " ".join(
-            f"{l}={label[t]}" for l,t in zip(word, guess_tiles)
-        )
+        if guess_tiles is not None:
+            feedback_str = _format_feedback(word, guess_tiles)
+        else:
+            feedback_str = obs.get("feedback", f"No feedback available for '{word}'.")
 
         guess_num = obs["num_guesses"]
         max_guesses = self.config.max_guesses

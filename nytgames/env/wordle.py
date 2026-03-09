@@ -34,6 +34,18 @@ CORRECT = "correct"  # green color, right color and right position
 PRESENT = "present"  # yellow color, right color but wrong position
 ABSENT = "absent"    # gray color, letter not in word at all
 
+_WORD_LABELS = {
+    CORRECT: "GREEN",
+    PRESENT: "YELLOW",
+    ABSENT: "GRAY",
+}
+
+_EMOJI_LABELS = {
+    CORRECT: "🟩",
+    PRESENT: "🟨",
+    ABSENT: "⬜",
+}
+
 def _score_guess(guess: str, target: str) -> list[str]:
     """
     Return a per letter result list for a single guess against target
@@ -56,17 +68,22 @@ def _score_guess(guess: str, target: str) -> list[str]:
 
     return result
 
-def _format_feedback(guess: str, tile_results: list[str]) -> str:
+def _format_feedback(guess: str, tile_results: list[str], style: str = "words") -> str:
     """
-    Return human readable string showing tile results for guess
+    Return human readable string showing tile results for guess.
+
+    Default feedback is word-based so it is easier to feed back into an LLM.
+    Use style="emoji" for the classic tile display in terminal rendering.
     """
-    symbols = {
-        CORRECT: "🟩",
-        PRESENT: "🟨",
-        ABSENT: "⬜"
-    }
-    tiles = "".join(symbols[tile] for tile in tile_results)
-    return f"{tiles}  {guess}"
+    if style == "emoji":
+        tiles = "".join(_EMOJI_LABELS[tile] for tile in tile_results)
+        return f"{tiles}  {guess}"
+    if style == "words":
+        return " ".join(
+            f"{letter}={_WORD_LABELS[tile]}"
+            for letter, tile in zip(guess, tile_results)
+        )
+    raise ValueError(f"Unsupported feedback style: {style}")
 
 
 class WordleEnv(NYTGameEnv):
@@ -136,7 +153,7 @@ class WordleEnv(NYTGameEnv):
         print(f"\n{'='*30}")
         print(f"Wordle | Guess {self.num_guesses}/{self.config.max_guesses}")
         for word, tiles in self.guesses:
-            print(_format_feedback(word, tiles))
+            print(_format_feedback(word, tiles, style="emoji"))
         # show blank rows
         for _ in range(self.config.max_guesses - len(self.guesses)):
             print("⬜⬜⬜⬜⬜")
@@ -236,6 +253,5 @@ if __name__ == "__main__":
         print(f"\n:) Solved in {obs['num_guesses']} guess(es)! Final score: {reward}")
     else:
         print(f"\n:( Out of guesses. The word was: {config.target_word}")
-
 
 
