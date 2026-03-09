@@ -84,7 +84,7 @@ class WordleEnv(NYTGameEnv):
         A string representing a 5-letter guess (case-insensitive).
 
     Reward:
-        0: invalid guess (wrong length, not in word list)
+        0: invalid guess (wrong length, not in word list, or already guessed)
         1: valid guess, not the answer
         10: correct answer on any attempt
         Bonus for guessing early: +2 per remaining guess after the winning one
@@ -106,11 +106,18 @@ class WordleEnv(NYTGameEnv):
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         action = action.strip().upper()
 
+        # Reject repeated guesses without consuming a turn (like real Wordle)
+        if action in self._guessed_words:
+            feedback = f"Invalid guess: '{action}' was already guessed."
+            self.info['history'].append((action, 0, feedback))
+            return self._get_obs(), 0, self._is_terminated(), self._is_truncated(), self.info
+
         self.num_guesses += 1
         valid, feedback, tile_results = self._process_guess(action)
 
         if valid:
-            self.guesses.append((action,tile_results))
+            self._guessed_words.add(action)
+            self.guesses.append((action, tile_results))
             self._update_keyboard(action, tile_results)
             if action == self.config.target_word:
                 self.solved = True
@@ -171,6 +178,7 @@ class WordleEnv(NYTGameEnv):
         self.num_guesses = 0
         self.total_points = 0
         self.guesses = []  # list of (guess, tile_results)
+        self._guessed_words = set()  # track unique guesses for repeat detection
         self.keyboard = {chr(c): None for c in range(ord('A'), ord('Z')+1)}  # letter -> CORRECT/PRESENT/ABSENT/None
         self.solved = False
         self.info = {'history': []}  # (guess, reward, feedback)
