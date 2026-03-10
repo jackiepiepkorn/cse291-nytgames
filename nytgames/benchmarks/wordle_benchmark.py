@@ -1,13 +1,13 @@
 import json
 import torch
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-from ..env.wordle import WordleEnv, WordleConfig, WORDLE_WORD_LENGTH
+from ..env.wordle import WordleEnv, WordleConfig, WORDLE_WORD_LENGTH, _score_guess
 from ..data.dataset import WordleDataset, load_dictionary
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -175,16 +175,62 @@ class WordleBenchmark:
                 {"role": "user", "content": user_msg},
             ]
 
+            # Constraint state
+            green = {}        # position → letter
+            yellow = {}       # position → set of letters (right letter, wrong spot)
+            gray = set()      # letters confirmed absent
+            previous_guesses = set()
+
             for _ in range(max_guesses):
-                guess = self._generate_guess(messages, temperature)
+                # Retry up to 10 times to get a valid, non-repeated dictionary word
+                guess = None
+                best_fallback = None
+                for _ in range(10):
+                    candidate = self._generate_guess(messages, temperature)
+                    if len(candidate) == 5 and candidate in self.word_set and candidate not in previous_guesses:
+                        guess = candidate
+                        break
+                    if best_fallback is None and candidate not in previous_guesses:
+                        best_fallback = candidate
+                if guess is None:
+                    guess = best_fallback or candidate
+
+                previous_guesses.add(guess)
                 messages.append({"role": "assistant", "content": guess})
                 obs, _, terminated, truncated, _ = env.step(guess)
 
                 if terminated or truncated:
                     break
 
+                # Update constraints from tile results
+                tiles = _score_guess(guess, config.target_word)
+                for pos, (letter, tile) in enumerate(zip(guess, tiles)):
+                    if tile == "correct":
+                        green[pos] = letter
+                    elif tile == "present":
+                        yellow.setdefault(pos, set()).add(letter)
+                    else:
+                        gray.add(letter)
+
+                # Build cumulative constraint summary
+                hints = []
+                if green:
+                    hints.append("Confirmed: " + ", ".join(
+                        f"{l} at position {p + 1}" for p, l in sorted(green.items())
+                    ))
+                present = {l for s in yellow.values() for l in s} - set(green.values())
+                if present:
+                    hints.append(f"In word but position unknown: {', '.join(sorted(present))}")
+                truly_gray = gray - set(green.values()) - present
+                if truly_gray:
+                    hints.append(f"Not in word: {', '.join(sorted(truly_gray))}")
+
                 remaining = max_guesses - obs["num_guesses"]
-                fb = f"Feedback: {obs['feedback']}\n{remaining} attempt(s) remaining. Guess another word."
+                fb = f"Feedback: {obs['feedback']}\nYou have {remaining} attempt(s) remaining."
+                if hints:
+                    fb += "\n\nWhat we know:\n" + "\n".join(hints)
+                fb += f"\nPrevious guesses: {', '.join(sorted(previous_guesses))}. Do NOT repeat any of these."
+                fb += "\nPlease guess another 5-letter word."
                 messages.append({"role": "user", "content": fb})
 
             if obs["solved"]:

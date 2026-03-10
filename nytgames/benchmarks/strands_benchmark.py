@@ -8,7 +8,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 from ..env.strands import StrandsEnv
-from ..data.dataset import StrandsDataset
+from ..data.dataset import StrandsDataset, load_dictionary
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -158,14 +158,18 @@ class StrandsBenchmark:
         total_theme_words_counts = []
         scores = []
 
+        dictionary = load_dictionary()
+
         for idx in range(n):
             item = self.dataset[idx]
             config = self.dataset.get_config(item["puzzle_id"])
+            config.dictionary = dictionary  # enables hint system
             env = StrandsEnv(config)
             obs, _ = env.reset()
 
             max_guesses = config.max_guesses  # 3 × num_theme_words by default
             num_theme_words = len(config.theme_words)
+            already_guessed = set()
 
             user_msg = self._user_prompt_template.format(
                 theme=config.theme,
@@ -181,14 +185,24 @@ class StrandsBenchmark:
             terminated = False
             truncated = False
             for _ in range(max_guesses):
-                guess = self._generate_guess(messages, temperature)
+                # Retry up to 10 times to get a non-empty, non-repeated word
+                guess = None
+                for _ in range(10):
+                    candidate = self._generate_guess(messages, temperature)
+                    if candidate and candidate not in already_guessed:
+                        guess = candidate
+                        break
+                if guess is None:
+                    guess = candidate or "SKIP"
+                already_guessed.add(guess)
+
                 messages.append({"role": "assistant", "content": guess})
                 obs, reward, terminated, truncated, _ = env.step(guess)
 
                 if terminated or truncated:
                     break
 
-                # Feedback message (mirror LLMHandler._strands_feedback)
+                # Feedback message
                 feedback = obs.get("feedback", "")
                 if reward == 5:
                     fb = f"'{guess}': {feedback} Spanagram! +5 points."
@@ -196,11 +210,11 @@ class StrandsBenchmark:
                     fb = f"'{guess}': {feedback} +1 point."
                 else:
                     fb = f"'{guess}': {feedback}"
+                found = ", ".join(obs["theme_words_guessed"]) if obs["theme_words_guessed"] else "none"
                 fb += (
-                    f"\n{obs['progress']}"
-                    f"\nGuesses used: {obs['num_guesses']}."
+                    f"\nFound so far: {found}."
                     f"\n\nUpdated board:\n{obs['board_str']}"
-                    f"\nPlease guess another word."
+                    f"\nPlease guess another board word."
                 )
                 messages.append({"role": "user", "content": fb})
 

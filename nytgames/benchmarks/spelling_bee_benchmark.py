@@ -166,6 +166,10 @@ class SpellingBeeBenchmark:
             env = SpellingBeeEnv(config)
             obs, _ = env.reset()
 
+            allowed_letters = set(l.upper() for l in config.letter_set)
+            center = config.center_letter.upper()
+            already_guessed = set()
+
             user_msg = self._user_prompt_template.format(
                 letters=", ".join(sorted(config.letter_set)),
                 center=config.center_letter,
@@ -179,7 +183,23 @@ class SpellingBeeBenchmark:
             terminated = False
             truncated = False
             for _ in range(max_guesses):
-                guess = self._generate_guess(messages, temperature)
+                # Retry up to 10 times to get a valid, non-repeated word
+                guess = None
+                best_fallback = None
+                for _ in range(10):
+                    candidate = self._generate_guess(messages, temperature)
+                    if (len(candidate) >= 4
+                            and set(candidate) <= allowed_letters
+                            and center in candidate
+                            and candidate not in already_guessed):
+                        guess = candidate
+                        break
+                    if candidate not in already_guessed and best_fallback is None:
+                        best_fallback = candidate
+                if guess is None:
+                    guess = best_fallback or candidate
+                already_guessed.add(guess)
+
                 messages.append({"role": "assistant", "content": guess})
                 obs, reward, terminated, truncated, _ = env.step(guess)
 
@@ -187,20 +207,17 @@ class SpellingBeeBenchmark:
                     break
 
                 # Feedback message
-                feedback = obs.get("feedback", "")
                 if reward > 0:
-                    fb = (
-                        f"'{guess}': {feedback} You earned {reward} point(s). "
-                        f"Running total: {obs['total_points']}."
-                    )
+                    fb = f"'{guess}' was correct! Running total: {obs['total_points']}."
                 else:
-                    fb = f"'{guess}': {feedback} No points earned."
+                    fb = f"'{guess}' was not accepted. {obs.get('feedback', '')}"
 
                 found = ", ".join(obs["valid_words_guessed"]) if obs["valid_words_guessed"] else "none"
                 fb += (
-                    f"\nGuesses used: {obs['num_guesses']}. "
-                    f"Words found so far: {found}.\n"
-                    f"Please guess another word."
+                    f"\nWords found so far: {found}."
+                    f"\nREMINDER: Only use letters {', '.join(sorted(allowed_letters))} "
+                    f"(center {center} required, min 4 letters)."
+                    f"\nPlease guess another word. Do NOT repeat any previous guess."
                 )
                 messages.append({"role": "user", "content": fb})
 
