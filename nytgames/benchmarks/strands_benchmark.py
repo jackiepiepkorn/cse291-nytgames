@@ -1,32 +1,36 @@
 import json
 import torch
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-from ..env.wordle import WordleEnv, WordleConfig, WORDLE_WORD_LENGTH
-from ..data.dataset import WordleDataset, load_dictionary
+from ..env.strands import StrandsEnv
+from ..data.dataset import StrandsDataset
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 @dataclass
-class WordleBenchmarkResults:
-    solved_count: int
+class StrandsBenchmarkResults:
+    fully_solved_count: int            # puzzles where all theme words found
     total: int
-    guesses_used: list  # guesses used for solved puzzles only
-    scores: list        # total_points per puzzle
+    theme_words_found_counts: list     # theme words found per puzzle
+    total_theme_words_counts: list     # total theme words per puzzle
+    scores: list                       # total reward per puzzle
 
     @property
     def solve_rate(self) -> float:
-        return self.solved_count / self.total if self.total > 0 else 0.0
+        return self.fully_solved_count / self.total if self.total > 0 else 0.0
 
     @property
-    def avg_guesses_solved(self) -> float:
-        return sum(self.guesses_used) / len(self.guesses_used) if self.guesses_used else 0.0
+    def avg_theme_words_found_pct(self) -> float:
+        if not self.theme_words_found_counts:
+            return 0.0
+        fracs = [f / t for f, t in zip(self.theme_words_found_counts, self.total_theme_words_counts) if t > 0]
+        return sum(fracs) / len(fracs) if fracs else 0.0
 
     @property
     def avg_score(self) -> float:
@@ -34,51 +38,46 @@ class WordleBenchmarkResults:
 
     def print_summary(self):
         print("=" * 50)
-        print("Wordle Benchmark Results")
+        print("Strands Benchmark Results")
         print("=" * 50)
-        print(f"Puzzles evaluated:    {self.total}")
-        print(f"Solved:               {self.solved_count}/{self.total} ({self.solve_rate:.1%})")
-        if self.guesses_used:
-            print(f"Avg guesses (solved): {self.avg_guesses_solved:.2f}")
-        print(f"Avg score:            {self.avg_score:.1f}")
+        print(f"Puzzles evaluated:      {self.total}")
+        print(f"Fully solved:           {self.fully_solved_count}/{self.total} ({self.solve_rate:.1%})")
+        print(f"Avg theme words found:  {self.avg_theme_words_found_pct:.1%}")
+        print(f"Avg score:              {self.avg_score:.1f}")
         print("=" * 50)
 
     def save(self, path: str):
         data = {
-            "solved_count": self.solved_count,
+            "fully_solved_count": self.fully_solved_count,
             "total": self.total,
             "solve_rate": self.solve_rate,
-            "avg_guesses_solved": self.avg_guesses_solved,
+            "avg_theme_words_found_pct": self.avg_theme_words_found_pct,
             "avg_score": self.avg_score,
             "per_puzzle_scores": self.scores,
-            "guesses_used_solved": self.guesses_used,
+            "per_puzzle_theme_words_found": self.theme_words_found_counts,
+            "per_puzzle_total_theme_words": self.total_theme_words_counts,
         }
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
         print(f"Results saved to {path}")
 
 
-class WordleBenchmark:
+class StrandsBenchmark:
     """
-    Evaluates a fine-tuned model over the full WordleDataset benchmark.
-
-    Loads the model from a path (merged model or LoRA adapter), plays full
-    multi-turn Wordle games using WordleEnv, and reports solve rate, avg
-    guesses, and score.
+    Evaluates a model over the StrandsDataset benchmark.
 
     Usage:
-        benchmark = WordleBenchmark(model_path='./grpo_wordle_output/merged')
+        benchmark = StrandsBenchmark(model_path='./model')
         results = benchmark.run(num_puzzles=100)
         results.print_summary()
-        results.save('results.json')
+        results.save('strands_results.json')
     """
 
     def __init__(
         self,
         model_path: str,
-        word_set: Optional[set] = None,
-        model=None,
-        tokenizer=None,
+        model: Optional[AutoModelForCausalLM] = None,
+        tokenizer: Optional[AutoTokenizer] = None,
     ):
         if model is not None and tokenizer is not None:
             self.model = model
@@ -110,19 +109,16 @@ class WordleBenchmark:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             self.model.eval()
 
-        self.dataset = WordleDataset()
-        self.word_set = word_set or load_dictionary(length=WORDLE_WORD_LENGTH)
+        self.dataset = StrandsDataset()
+        self._system_prompt = (_PROMPTS_DIR / "strands_system.md").read_text().strip()
+        self._user_prompt_template = (_PROMPTS_DIR / "strands_user.md").read_text().strip()
 
-        self._system_prompt = (_PROMPTS_DIR / "wordle_system.md").read_text().strip()
-        self._user_prompt_template = (_PROMPTS_DIR / "wordle_user.md").read_text().strip()
-
-    def _generate_guess(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 8) -> str:
+    def _generate_guess(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 10) -> str:
         try:
             text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
             )
         except TypeError:
-            # Fallback for older transformers without Qwen3 thinking support
             text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
@@ -140,65 +136,90 @@ class WordleBenchmark:
             outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
         ).strip()
         word = raw.split()[0] if raw.split() else raw
-        return "".join(c for c in word if c.isalpha()).upper()[:5]
+        return "".join(c for c in word if c.isalpha()).upper()
 
     def run(
         self,
         num_puzzles: Optional[int] = None,
-        max_guesses: int = 6,
         temperature: float = 0.0,
         verbose: bool = True,
-    ) -> WordleBenchmarkResults:
+    ) -> StrandsBenchmarkResults:
         """
-        Play full multi-turn Wordle games over the dataset.
+        Play full multi-turn Strands games over the dataset.
 
         Args:
-            num_puzzles: number of puzzles to evaluate (None = all ~2300)
-            max_guesses: guesses allowed per game
+            num_puzzles: number of puzzles to evaluate (None = all)
             temperature: 0.0 = greedy decoding (recommended for eval)
             verbose: print progress every 50 puzzles
         """
         n = min(num_puzzles, len(self.dataset)) if num_puzzles else len(self.dataset)
-        solved_count = 0
-        guesses_used = []
+        fully_solved_count = 0
+        theme_words_found_counts = []
+        total_theme_words_counts = []
         scores = []
 
         for idx in range(n):
             item = self.dataset[idx]
-            config = self.dataset.get_config(item["puzzle_id"], max_guesses=max_guesses)
-            env = WordleEnv(config)
+            config = self.dataset.get_config(item["puzzle_id"])
+            env = StrandsEnv(config)
             obs, _ = env.reset()
 
-            user_msg = self._user_prompt_template.format(max_guesses=max_guesses)
+            max_guesses = config.max_guesses  # 3 × num_theme_words by default
+            num_theme_words = len(config.theme_words)
+
+            user_msg = self._user_prompt_template.format(
+                theme=config.theme,
+                num_theme_words=num_theme_words,
+                max_guesses=max_guesses,
+                board_str=obs["board_str"],
+            )
             messages = [
                 {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": user_msg},
             ]
 
+            terminated = False
+            truncated = False
             for _ in range(max_guesses):
                 guess = self._generate_guess(messages, temperature)
                 messages.append({"role": "assistant", "content": guess})
-                obs, _, terminated, truncated, _ = env.step(guess)
+                obs, reward, terminated, truncated, _ = env.step(guess)
 
                 if terminated or truncated:
                     break
 
-                remaining = max_guesses - obs["num_guesses"]
-                fb = f"Feedback: {obs['feedback']}\n{remaining} attempt(s) remaining. Guess another word."
+                # Feedback message (mirror LLMHandler._strands_feedback)
+                feedback = obs.get("feedback", "")
+                if reward == 5:
+                    fb = f"'{guess}': {feedback} Spanagram! +5 points."
+                elif reward == 1:
+                    fb = f"'{guess}': {feedback} +1 point."
+                else:
+                    fb = f"'{guess}': {feedback}"
+                fb += (
+                    f"\n{obs['progress']}"
+                    f"\nGuesses used: {obs['num_guesses']}."
+                    f"\n\nUpdated board:\n{obs['board_str']}"
+                    f"\nPlease guess another word."
+                )
                 messages.append({"role": "user", "content": fb})
 
-            if obs["solved"]:
-                solved_count += 1
-                guesses_used.append(obs["num_guesses"])
-            scores.append(obs["total_points"])
+            if terminated:
+                fully_solved_count += 1
+
+            theme_words_found_counts.append(len(obs["theme_words_guessed"]))
+            total_theme_words_counts.append(num_theme_words)
+            total_reward = sum(r for _, r, _ in env.info.get("history", []))
+            scores.append(total_reward)
 
             if verbose and (idx + 1) % 50 == 0:
-                rate = solved_count / (idx + 1)
-                print(f"[{idx + 1}/{n}] Solved: {solved_count}/{idx + 1} ({rate:.1%})")
+                rate = fully_solved_count / (idx + 1)
+                print(f"[{idx + 1}/{n}] Fully solved: {fully_solved_count}/{idx + 1} ({rate:.1%})")
 
-        return WordleBenchmarkResults(
-            solved_count=solved_count,
+        return StrandsBenchmarkResults(
+            fully_solved_count=fully_solved_count,
             total=n,
-            guesses_used=guesses_used,
+            theme_words_found_counts=theme_words_found_counts,
+            total_theme_words_counts=total_theme_words_counts,
             scores=scores,
         )

@@ -1,32 +1,36 @@
 import json
 import torch
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-from ..env.wordle import WordleEnv, WordleConfig, WORDLE_WORD_LENGTH
-from ..data.dataset import WordleDataset, load_dictionary
+from ..env.spellingbee import SpellingBeeEnv
+from ..data.dataset import SpellingBeeDataset
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 @dataclass
-class WordleBenchmarkResults:
-    solved_count: int
+class SpellingBeeBenchmarkResults:
+    fully_solved_count: int   # puzzles where ALL words found
     total: int
-    guesses_used: list  # guesses used for solved puzzles only
-    scores: list        # total_points per puzzle
+    words_found_counts: list  # words found per puzzle
+    total_words_counts: list  # total words available per puzzle
+    scores: list              # total_points per puzzle
 
     @property
     def solve_rate(self) -> float:
-        return self.solved_count / self.total if self.total > 0 else 0.0
+        return self.fully_solved_count / self.total if self.total > 0 else 0.0
 
     @property
-    def avg_guesses_solved(self) -> float:
-        return sum(self.guesses_used) / len(self.guesses_used) if self.guesses_used else 0.0
+    def avg_words_found_pct(self) -> float:
+        if not self.words_found_counts:
+            return 0.0
+        fracs = [f / t for f, t in zip(self.words_found_counts, self.total_words_counts) if t > 0]
+        return sum(fracs) / len(fracs) if fracs else 0.0
 
     @property
     def avg_score(self) -> float:
@@ -34,51 +38,46 @@ class WordleBenchmarkResults:
 
     def print_summary(self):
         print("=" * 50)
-        print("Wordle Benchmark Results")
+        print("Spelling Bee Benchmark Results")
         print("=" * 50)
         print(f"Puzzles evaluated:    {self.total}")
-        print(f"Solved:               {self.solved_count}/{self.total} ({self.solve_rate:.1%})")
-        if self.guesses_used:
-            print(f"Avg guesses (solved): {self.avg_guesses_solved:.2f}")
+        print(f"Fully solved:         {self.fully_solved_count}/{self.total} ({self.solve_rate:.1%})")
+        print(f"Avg words found:      {self.avg_words_found_pct:.1%}")
         print(f"Avg score:            {self.avg_score:.1f}")
         print("=" * 50)
 
     def save(self, path: str):
         data = {
-            "solved_count": self.solved_count,
+            "fully_solved_count": self.fully_solved_count,
             "total": self.total,
             "solve_rate": self.solve_rate,
-            "avg_guesses_solved": self.avg_guesses_solved,
+            "avg_words_found_pct": self.avg_words_found_pct,
             "avg_score": self.avg_score,
             "per_puzzle_scores": self.scores,
-            "guesses_used_solved": self.guesses_used,
+            "per_puzzle_words_found": self.words_found_counts,
+            "per_puzzle_total_words": self.total_words_counts,
         }
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
         print(f"Results saved to {path}")
 
 
-class WordleBenchmark:
+class SpellingBeeBenchmark:
     """
-    Evaluates a fine-tuned model over the full WordleDataset benchmark.
-
-    Loads the model from a path (merged model or LoRA adapter), plays full
-    multi-turn Wordle games using WordleEnv, and reports solve rate, avg
-    guesses, and score.
+    Evaluates a model over the SpellingBeeDataset benchmark.
 
     Usage:
-        benchmark = WordleBenchmark(model_path='./grpo_wordle_output/merged')
+        benchmark = SpellingBeeBenchmark(model_path='./model')
         results = benchmark.run(num_puzzles=100)
         results.print_summary()
-        results.save('results.json')
+        results.save('spelling_bee_results.json')
     """
 
     def __init__(
         self,
         model_path: str,
-        word_set: Optional[set] = None,
-        model=None,
-        tokenizer=None,
+        model: Optional[AutoModelForCausalLM] = None,
+        tokenizer: Optional[AutoTokenizer] = None,
     ):
         if model is not None and tokenizer is not None:
             self.model = model
@@ -110,19 +109,16 @@ class WordleBenchmark:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             self.model.eval()
 
-        self.dataset = WordleDataset()
-        self.word_set = word_set or load_dictionary(length=WORDLE_WORD_LENGTH)
+        self.dataset = SpellingBeeDataset()
+        self._system_prompt = (_PROMPTS_DIR / "spelling_bee_system.md").read_text().strip()
+        self._user_prompt_template = (_PROMPTS_DIR / "spelling_bee_user.md").read_text().strip()
 
-        self._system_prompt = (_PROMPTS_DIR / "wordle_system.md").read_text().strip()
-        self._user_prompt_template = (_PROMPTS_DIR / "wordle_user.md").read_text().strip()
-
-    def _generate_guess(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 8) -> str:
+    def _generate_guess(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 10) -> str:
         try:
             text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
             )
         except TypeError:
-            # Fallback for older transformers without Qwen3 thinking support
             text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
@@ -140,65 +136,89 @@ class WordleBenchmark:
             outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
         ).strip()
         word = raw.split()[0] if raw.split() else raw
-        return "".join(c for c in word if c.isalpha()).upper()[:5]
+        return "".join(c for c in word if c.isalpha()).upper()
 
     def run(
         self,
         num_puzzles: Optional[int] = None,
-        max_guesses: int = 6,
+        max_guesses: int = 10,
         temperature: float = 0.0,
         verbose: bool = True,
-    ) -> WordleBenchmarkResults:
+    ) -> SpellingBeeBenchmarkResults:
         """
-        Play full multi-turn Wordle games over the dataset.
+        Play full multi-turn Spelling Bee games over the dataset.
 
         Args:
-            num_puzzles: number of puzzles to evaluate (None = all ~2300)
+            num_puzzles: number of puzzles to evaluate (None = all)
             max_guesses: guesses allowed per game
             temperature: 0.0 = greedy decoding (recommended for eval)
             verbose: print progress every 50 puzzles
         """
         n = min(num_puzzles, len(self.dataset)) if num_puzzles else len(self.dataset)
-        solved_count = 0
-        guesses_used = []
+        fully_solved_count = 0
+        words_found_counts = []
+        total_words_counts = []
         scores = []
 
         for idx in range(n):
             item = self.dataset[idx]
             config = self.dataset.get_config(item["puzzle_id"], max_guesses=max_guesses)
-            env = WordleEnv(config)
+            env = SpellingBeeEnv(config)
             obs, _ = env.reset()
 
-            user_msg = self._user_prompt_template.format(max_guesses=max_guesses)
+            user_msg = self._user_prompt_template.format(
+                letters=", ".join(sorted(config.letter_set)),
+                center=config.center_letter,
+                max_guesses=max_guesses,
+            )
             messages = [
                 {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": user_msg},
             ]
 
+            terminated = False
+            truncated = False
             for _ in range(max_guesses):
                 guess = self._generate_guess(messages, temperature)
                 messages.append({"role": "assistant", "content": guess})
-                obs, _, terminated, truncated, _ = env.step(guess)
+                obs, reward, terminated, truncated, _ = env.step(guess)
 
                 if terminated or truncated:
                     break
 
-                remaining = max_guesses - obs["num_guesses"]
-                fb = f"Feedback: {obs['feedback']}\n{remaining} attempt(s) remaining. Guess another word."
+                # Feedback message
+                feedback = obs.get("feedback", "")
+                if reward > 0:
+                    fb = (
+                        f"'{guess}': {feedback} You earned {reward} point(s). "
+                        f"Running total: {obs['total_points']}."
+                    )
+                else:
+                    fb = f"'{guess}': {feedback} No points earned."
+
+                found = ", ".join(obs["valid_words_guessed"]) if obs["valid_words_guessed"] else "none"
+                fb += (
+                    f"\nGuesses used: {obs['num_guesses']}. "
+                    f"Words found so far: {found}.\n"
+                    f"Please guess another word."
+                )
                 messages.append({"role": "user", "content": fb})
 
-            if obs["solved"]:
-                solved_count += 1
-                guesses_used.append(obs["num_guesses"])
+            if terminated:
+                fully_solved_count += 1
+
+            words_found_counts.append(len(obs["valid_words_guessed"]))
+            total_words_counts.append(len(config.word_set))
             scores.append(obs["total_points"])
 
             if verbose and (idx + 1) % 50 == 0:
-                rate = solved_count / (idx + 1)
-                print(f"[{idx + 1}/{n}] Solved: {solved_count}/{idx + 1} ({rate:.1%})")
+                rate = fully_solved_count / (idx + 1)
+                print(f"[{idx + 1}/{n}] Fully solved: {fully_solved_count}/{idx + 1} ({rate:.1%})")
 
-        return WordleBenchmarkResults(
-            solved_count=solved_count,
+        return SpellingBeeBenchmarkResults(
+            fully_solved_count=fully_solved_count,
             total=n,
-            guesses_used=guesses_used,
+            words_found_counts=words_found_counts,
+            total_words_counts=total_words_counts,
             scores=scores,
         )
