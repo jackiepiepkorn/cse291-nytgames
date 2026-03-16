@@ -1,15 +1,12 @@
 import json
 import re
-import torch
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
-
 from ..env.connections import ConnectionsEnv
 from ..data.dataset import ConnectionsDataset
+from .backend import GuessBackend, extract_answer
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -67,74 +64,23 @@ class ConnectionsBenchmark:
     4 comma-separated words.
 
     Usage:
-        benchmark = ConnectionsBenchmark(model_path='./model')
+        benchmark = ConnectionsBenchmark(backend)
         results = benchmark.run(num_puzzles=100)
         results.print_summary()
         results.save('connections_results.json')
     """
 
-    def __init__(
-        self,
-        model_path: str,
-        model: Optional[AutoModelForCausalLM] = None,
-        tokenizer: Optional[AutoTokenizer] = None,
-    ):
-        if model is not None and tokenizer is not None:
-            self.model = model
-            self.tokenizer = tokenizer
-        else:
-            model_path = Path(model_path)
-            adapter_config_path = model_path / "adapter_config.json"
-
-            if adapter_config_path.exists():
-                with open(adapter_config_path) as f:
-                    adapter_cfg = json.load(f)
-                base_name = adapter_cfg.get("base_model_name_or_path", adapter_cfg.get("base_model"))
-                print(f"Loading base model: {base_name}")
-                base = AutoModelForCausalLM.from_pretrained(
-                    base_name,
-                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto",
-                )
-                self.model = PeftModel.from_pretrained(base, str(model_path))
-            else:
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    str(model_path),
-                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto",
-                )
-
-            self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.model.eval()
-
+    def __init__(self, backend: GuessBackend):
+        self.backend = backend
         self.dataset = ConnectionsDataset()
         self._system_prompt = (_PROMPTS_DIR / "connections_system.md").read_text().strip()
         self._user_prompt_template = (_PROMPTS_DIR / "connections_user.md").read_text().strip()
 
     def _generate_response(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 200) -> str:
-        try:
-            text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
-            )
-        except TypeError:
-            text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature if temperature > 0 else None,
-                do_sample=temperature > 0,
-                top_p=0.95 if temperature > 0 else None,
-            )
-        return self.tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        ).strip()
+        raw = self.backend.generate_text(messages, max_new_tokens=max_new_tokens, temperature=temperature)
+        if self.backend.use_thinking_format:
+            raw = extract_answer(raw)
+        return raw
 
     @staticmethod
     def _parse_guess(response: str) -> str:

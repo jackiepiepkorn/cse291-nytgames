@@ -1,14 +1,11 @@
 import json
-import torch
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
-
 from ..env.wordle import WordleEnv, WordleConfig, WORDLE_WORD_LENGTH, _score_guess
 from ..data.dataset import WordleDataset, load_dictionary
+from .backend import GuessBackend, extract_answer
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -60,85 +57,32 @@ class WordleBenchmarkResults:
 
 class WordleBenchmark:
     """
-    Evaluates a fine-tuned model over the full WordleDataset benchmark.
+    Evaluates a model over the full WordleDataset benchmark.
 
-    Loads the model from a path (merged model or LoRA adapter), plays full
-    multi-turn Wordle games using WordleEnv, and reports solve rate, avg
-    guesses, and score.
+    Accepts a GuessBackend (HFBackend or CloudBackend) for generation.
+    Plays full multi-turn Wordle games using WordleEnv and reports solve rate,
+    avg guesses, and score.
 
     Usage:
-        benchmark = WordleBenchmark(model_path='./grpo_wordle_output/merged')
+        from nytgames.benchmarks.backend import HFBackend
+        backend = HFBackend(model, tokenizer)
+        benchmark = WordleBenchmark(backend)
         results = benchmark.run(num_puzzles=100)
         results.print_summary()
         results.save('results.json')
     """
 
-    def __init__(
-        self,
-        model_path: str,
-        word_set: Optional[set] = None,
-        model=None,
-        tokenizer=None,
-    ):
-        if model is not None and tokenizer is not None:
-            self.model = model
-            self.tokenizer = tokenizer
-        else:
-            model_path = Path(model_path)
-            adapter_config_path = model_path / "adapter_config.json"
-
-            if adapter_config_path.exists():
-                with open(adapter_config_path) as f:
-                    adapter_cfg = json.load(f)
-                base_name = adapter_cfg.get("base_model_name_or_path", adapter_cfg.get("base_model"))
-                print(f"Loading base model: {base_name}")
-                base = AutoModelForCausalLM.from_pretrained(
-                    base_name,
-                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto",
-                )
-                self.model = PeftModel.from_pretrained(base, str(model_path))
-            else:
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    str(model_path),
-                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto",
-                )
-
-            self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.model.eval()
-
+    def __init__(self, backend: GuessBackend, word_set: Optional[set] = None):
+        self.backend = backend
         self.dataset = WordleDataset()
         self.word_set = word_set or load_dictionary(length=WORDLE_WORD_LENGTH)
-
         self._system_prompt = (_PROMPTS_DIR / "wordle_system.md").read_text().strip()
         self._user_prompt_template = (_PROMPTS_DIR / "wordle_user.md").read_text().strip()
 
     def _generate_guess(self, messages: list, temperature: float = 0.0, max_new_tokens: int = 8) -> str:
-        try:
-            text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
-            )
-        except TypeError:
-            # Fallback for older transformers without Qwen3 thinking support
-            text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature if temperature > 0 else None,
-                do_sample=temperature > 0,
-                top_p=0.95 if temperature > 0 else None,
-            )
-        raw = self.tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        ).strip()
+        raw = self.backend.generate_text(messages, max_new_tokens=max_new_tokens, temperature=temperature)
+        if self.backend.use_thinking_format:
+            raw = extract_answer(raw)
         word = raw.split()[0] if raw.split() else raw
         return "".join(c for c in word if c.isalpha()).upper()[:5]
 
